@@ -16,6 +16,8 @@ docker-compose down
 ```
 
 ---
+## NIFI flow:
+![Flow](nifi_flow.png)
 
 ## Containers
 
