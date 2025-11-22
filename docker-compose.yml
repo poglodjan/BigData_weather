@@ -1,13 +1,7 @@
-# Containers:
-# 1) NameNode
-# 2) DataNode
-# 3) hdfs-ingester
-# 4) NiFi
-# 5) tester
 
 version: '3.7'
 services:
-  namenode: ### main part of HDFS - keeps files matadata
+  namenode:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: namenode
     environment:
@@ -16,10 +10,10 @@ services:
     volumes:
       - hdfs_namenode:/hadoop/dfs/name
     ports:
-      - "9000:9000" # HDFS RPC
-      - "9870:9870" # WebHDFS (Hadoop 3 default, NameNode web UI for out flask app)
+      - "9000:9000"
+      - "9870:9870"
 
-  datanode: ### data warehouse - keeps data in HDFS 
+  datanode:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode
     environment:
@@ -30,7 +24,40 @@ services:
     depends_on:
       - namenode
 
-  nifi: ### nifi configuration
+  # --- NOWE: jednorazowa inicjalizacja HDFS (katalogi i prawa) ---
+  hdfs-init:
+    image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-init
+    depends_on:
+      - namenode
+      - datanode
+    environment:
+      - HADOOP_CONF_DIR=/etc/hadoop
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    volumes:
+      - ./hadoop/conf:/etc/hadoop
+    entrypoint: ["/bin/bash", "-lc"]
+    command: >
+      "
+        echo 'Waiting for NameNode RPC...';
+        until echo 'exit' | nc namenode 9000; do sleep 2; done;
+
+        echo 'INIT as ROOT — creating directory structure';
+        export HADOOP_USER_NAME=root;
+
+        hdfs dfs -mkdir -p /user/hdfs/electricitymaps/zone_PL;
+
+        echo 'Changing ownership to HDFS user...';
+        hdfs dfs -chown -R hdfs:supergroup /user/hdfs
+
+        echo 'Setting permissions...';
+        hdfs dfs -chmod -R 775 /user/hdfs
+
+        echo 'Listing directories...';
+        hdfs dfs -ls -R /user/hdfs
+      "
+
+  nifi:
     image: apache/nifi:1.25.0
     container_name: nifi
     ports:
@@ -44,19 +71,23 @@ services:
     depends_on:
       - hdfs-ingester
 
-  hdfs-ingester: ### python microservis in flask - NiFi sends JSON on /ingest
+  hdfs-ingester:
     build: ./hdfs_ingester
     container_name: hdfs-ingester
     environment:
       - NAMENODE_HOST=namenode
-      - NAMENODE_PORT=9870 # adjust if your NameNode uses 50070
+      - NAMENODE_PORT=9870
       - HDFS_USER=hdfs
+      - DATANODE_HOST=datanode
+      - DATANODE_PORT=9864
     depends_on:
       - namenode
+      - datanode
+      - hdfs-init
     ports:
       - "5050:5000"
 
-  tester: ### end-to-end tests
+  tester:
     build: ./tests
     container_name: tester
     environment:

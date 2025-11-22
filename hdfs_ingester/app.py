@@ -1,51 +1,102 @@
-
 from flask import Flask, request, jsonify
-import os
-import requests
-import json
+import os, requests, json
 from datetime import datetime
 
 app = Flask(__name__)
 
 NAMENODE_HOST = os.environ.get('NAMENODE_HOST', 'namenode')
 NAMENODE_PORT = os.environ.get('NAMENODE_PORT', '9870')
-HDFS_USER = os.environ.get('HDFS_USER', 'hdfs')
+HDFS_USER     = os.environ.get('HDFS_USER', 'hdfs')
 
-WEBHDFS_BASE = f'http://{NAMENODE_HOST}:{NAMENODE_PORT}/webhdfs/v1'
+WEBHDFS_BASE  = f'http://{NAMENODE_HOST}:{NAMENODE_PORT}/webhdfs/v1'
+BASE_DIR      = f'/user/{HDFS_USER}/electricitymaps/zone_PL'
 
+# Required for WebHDFS (CSRF)
+WEBHDFS_HEADERS = {'X-XSRF-Header': '1'}
+
+@app.route('/ingest', methods=['HEAD'])
+def ingest_head():
+    return ('', 200)
 
 @app.route('/ingest', methods=['POST'])
 def ingest():
-    payload = request.get_json()
-    if payload is None:
-        return jsonify({'error': 'no json'}), 400
+    try:
+        # Force JSON parsing — NiFi may miss Content-Type
+        payload = request.get_json(force=True)
 
-    # Create name of the file (datetime)
-    ts = datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    path = f'/electricitymaps/zone_PL/{ts}.json'
+        ts   = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+        path = f'{BASE_DIR}/{ts}.json'
 
-    # Create new file in HDFS
-    params = {'op': 'CREATE', 'user.name': HDFS_USER, 'overwrite': 'true'}
-    create_url = f"{WEBHDFS_BASE}{path}"
-    r = requests.put(create_url, params=params, allow_redirects=False)
+        # Step 1 — CREATE (should return 307 redirect to DataNode)
+        create_url = f"{WEBHDFS_BASE}{path}"
+        params = {
+            'op': 'CREATE',
+            'user.name': HDFS_USER,
+            'overwrite': 'true',
+            'createparent': 'true'
+        }
 
-    # Check for errors
-    if r.status_code not in (307, 201):
-        return jsonify({'error': 'create failed'}), 500
+        r = requests.put(
+            create_url,
+            params=params,
+            allow_redirects=False,
+            headers=WEBHDFS_HEADERS,
+            timeout=10
+        )
 
-    # Take this URL for PUT
-    put_url = r.headers.get('Location')
-    if put_url:
-        requests.put(put_url, data=json.dumps(payload))
+        # --- CASE: redirect to DataNode
+        if r.status_code == 307:
+            put_url = r.headers['Location']
+            put_headers = {
+                **WEBHDFS_HEADERS,
+                'Content-Type': 'application/json'
+            }
 
-    # Data that we got
-    return jsonify({
-        'result': 'ok',
-        'path': path,
-        'zone': payload.get('zone'),
-        'datetime': payload.get('data', [{}])[0].get('datetime'),
-        'mix': payload.get('data', [{}])[0].get('mix')
-    }), 201
+            put = requests.put(
+                put_url,
+                data=json.dumps(payload),
+                headers=put_headers,
+                timeout=15
+            )
+
+            if put.status_code not in (200, 201):
+                return jsonify({
+                    'error': 'put failed',
+                    'status': put.status_code,
+                    'text': put.text
+                }), 500
+
+        # --- CASE: created without redirect
+        elif r.status_code == 201:
+            return jsonify({
+                'result': 'ok',
+                'path': path,
+            }), 201
+
+        # --- CASE: failure
+        else:
+            return jsonify({
+                'error': 'create failed',
+                'status': r.status_code,
+                'text': r.text
+            }), 500
+
+        # Build return fields
+        first = (payload.get('data') or [{}])[0]
+
+        return jsonify({
+            'result': 'ok',
+            'path': path,
+            'zone': payload.get('zone'),
+            'datetime': first.get('datetime'),
+            'mix': first.get('mix'),
+        }), 201
+
+    except Exception as e:
+        return jsonify({
+            'error': 'internal',
+            'message': str(e)
+        }), 500
 
 
 if __name__ == '__main__':
