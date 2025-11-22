@@ -1,7 +1,7 @@
 
 version: '3.7'
 services:
-  namenode:
+  namenode: ### main part of HDFS - keeps files matadata
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: namenode
     environment:
@@ -13,7 +13,7 @@ services:
       - "9000:9000"
       - "9870:9870"
 
-  datanode:
+  datanode: ### data warehouse - keeps data in HDFS 
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode
     environment:
@@ -24,8 +24,7 @@ services:
     depends_on:
       - namenode
 
-  # --- NOWE: jednorazowa inicjalizacja HDFS (katalogi i prawa) ---
-  hdfs-init:
+  hdfs-init: ### to create init folders and permissions 
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
     container_name: hdfs-init
     depends_on:
@@ -57,7 +56,7 @@ services:
         hdfs dfs -ls -R /user/hdfs
       "
 
-  nifi:
+  nifi: ### nifi configuration
     image: apache/nifi:1.25.0
     container_name: nifi
     ports:
@@ -71,7 +70,7 @@ services:
     depends_on:
       - hdfs-ingester
 
-  hdfs-ingester:
+  hdfs-ingester: ### python microservis in flask - NiFi sends JSON on /ingest
     build: ./hdfs_ingester
     container_name: hdfs-ingester
     environment:
@@ -87,7 +86,7 @@ services:
     ports:
       - "5050:5000"
 
-  tester:
+  tester: ### end-to-end tests
     build: ./tests
     container_name: tester
     environment:
