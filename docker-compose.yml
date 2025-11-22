@@ -1,0 +1,74 @@
+# Containers:
+# 1) NameNode
+# 2) DataNode
+# 3) hdfs-ingester
+# 4) NiFi
+# 5) tester
+
+version: '3.7'
+services:
+  namenode: ### main part of HDFS - keeps files matadata
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    environment:
+      - CLUSTER_NAME=nm-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    volumes:
+      - hdfs_namenode:/hadoop/dfs/name
+    ports:
+      - "9000:9000" # HDFS RPC
+      - "9870:9870" # WebHDFS (Hadoop 3 default, NameNode web UI for out flask app)
+
+  datanode: ### data warehouse - keeps data in HDFS 
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_NAMENODE_URI=hdfs://namenode:9000
+    volumes:
+      - hdfs_datanode:/hadoop/dfs/data
+    depends_on:
+      - namenode
+
+  nifi: ### nifi configuration
+    image: apache/nifi:1.25.0
+    container_name: nifi
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nifi:/opt/nifi/nifi-current/templates
+      - nifi_state:/opt/nifi/nifi-current/flow
+    environment:
+      - NIFI_WEB_HTTP_HOST=0.0.0.0
+      - NIFI_WEB_HTTP_PORT=8080
+    depends_on:
+      - hdfs-ingester
+
+  hdfs-ingester: ### python microservis in flask - NiFi sends JSON on /ingest
+    build: ./hdfs_ingester
+    container_name: hdfs-ingester
+    environment:
+      - NAMENODE_HOST=namenode
+      - NAMENODE_PORT=9870 # adjust if your NameNode uses 50070
+      - HDFS_USER=hdfs
+    depends_on:
+      - namenode
+    ports:
+      - "5050:5000"
+
+  tester: ### end-to-end tests
+    build: ./tests
+    container_name: tester
+    environment:
+      - ELECTRICITYMAPS_TOKEN=${ELECTRICITYMAPS_TOKEN}
+      - NAMENODE_HOST=namenode
+      - NAMENODE_PORT=9870
+    depends_on:
+      - nifi
+      - hdfs-ingester
+      - namenode
+
+volumes:
+  hdfs_namenode:
+  hdfs_datanode:
+  nifi_state:
