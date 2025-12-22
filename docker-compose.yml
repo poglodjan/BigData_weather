@@ -1,62 +1,71 @@
-
-version: '3.7'
+version: '3.8'
 services:
   namenode: ### main part of HDFS - keeps files matadata
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: namenode
+    platform: linux/amd64
     environment:
       - CLUSTER_NAME=nm-cluster
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_permissions_enabled=false 
     volumes:
       - hdfs_namenode:/hadoop/dfs/name
     ports:
       - "9000:9000"
       - "9870:9870"
 
-  datanode: ### data warehouse - keeps data in HDFS 
+  datanode:  ### data warehouse - keeps data in HDFS 
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode
+    platform: linux/amd64
     environment:
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
       - HDFS_NAMENODE_URI=hdfs://namenode:9000
+      - DFS_DATANODE_USE_DATANODE_HOSTNAME=true
     volumes:
       - hdfs_datanode:/hadoop/dfs/data
     depends_on:
       - namenode
 
-  hdfs-init: ### to create init folders and permissions 
+  hdfs-init: 
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
     container_name: hdfs-init
+    platform: linux/amd64
     depends_on:
       - namenode
       - datanode
     environment:
-      - HADOOP_CONF_DIR=/etc/hadoop
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
-    volumes:
-      - ./hadoop/conf:/etc/hadoop
-    entrypoint: ["/bin/bash", "-lc"]
-    command: >
-      "
-        echo 'Waiting for NameNode RPC...';
-        until echo 'exit' | nc namenode 9000; do sleep 2; done;
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      echo "STARTING HDFS INIT..."
+      
+      until hdfs dfs -ls /; do 
+        echo "Waiting for NameNode..."
+        sleep 5
+      done
 
-        echo 'INIT as ROOT — creating directory structure';
-        export HADOOP_USER_NAME=root;
+      echo "Leaving Safe Mode..."
+      hdfs dfsadmin -safemode leave
 
-        hdfs dfs -mkdir -p /user/hdfs/electricitymaps/zone_PL;
+      echo "Creating directories..."
+      hdfs dfs -mkdir -p /user/hdfs/electricitymaps/zone_PL
+      hdfs dfs -mkdir -p /user/hdfs/openmeteo/warsaw
+      
+      if [ $$? -eq 0 ]; then
+        echo "Directories created successfully."
+      else
+        echo "FAILED to create directories."
+        exit 1
+      fi
 
-        echo 'Changing ownership to HDFS user...';
-        hdfs dfs -chown -R hdfs:supergroup /user/hdfs
+      hdfs dfs -chmod -R 777 /user
+      
+      echo "Structure:"
+      hdfs dfs -ls -R /
+      echo "HDFS INIT FINISHED."
 
-        echo 'Setting permissions...';
-        hdfs dfs -chmod -R 775 /user/hdfs
-
-        echo 'Listing directories...';
-        hdfs dfs -ls -R /user/hdfs
-      "
-
-  nifi: ### nifi configuration
+  nifi:  ### to create init folders and permissions
     image: apache/nifi:1.25.0
     container_name: nifi
     ports:
@@ -70,7 +79,7 @@ services:
     depends_on:
       - hdfs-ingester
 
-  hdfs-ingester: ### python microservis in flask - NiFi sends JSON on /ingest
+  hdfs-ingester:  ### python microservis in flask - NiFi sends JSON on /ingest
     build: ./hdfs_ingester
     container_name: hdfs-ingester
     environment:
@@ -79,14 +88,18 @@ services:
       - HDFS_USER=hdfs
       - DATANODE_HOST=datanode
       - DATANODE_PORT=9864
+      - PYTHONUNBUFFERED=1
     depends_on:
-      - namenode
-      - datanode
-      - hdfs-init
+      namenode:
+        condition: service_started
+      datanode:
+        condition: service_started
+      hdfs-init:
+        condition: service_completed_successfully
     ports:
       - "5050:5000"
 
-  tester: ### end-to-end tests
+  tester:
     build: ./tests
     container_name: tester
     environment:
