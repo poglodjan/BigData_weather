@@ -5,6 +5,7 @@ import json
 import os
 import sys
 
+import pyhdfs
 import requests
 
 
@@ -18,21 +19,23 @@ VALUES = ["carbon-intensity", "renewable-energy", "electricity-mix", "total-load
 ZONE = "PL"
 
 TOKEN = os.environ.get("ELECTRICITYMAPS_TOKEN")
+
+NAMENODE_HOST = os.environ.get('NAMENODE_HOST', 'localhost')
+NAMENODE_PORT = os.environ.get('NAMENODE_PORT', '9870')
+HDFS_USER     = os.environ.get('HDFS_USER', 'hdfs')
+HDFS_PATH = f"/user/{HDFS_USER}/electricitymaps/history/zone_PL"
+
+
+hdfs = pyhdfs.HdfsClient(f"{NAMENODE_HOST}:{NAMENODE_PORT}",
+                         user_name=HDFS_USER)
 if TOKEN is None:
     print("Missing ELECTRICITYMAPS_TOKEN environment variable")
     exit(1)
 
-if len(sys.argv) > 1:
-    PATH = sys.argv[1]
-else:
-    PATH = "./historical-electricity"
-
-ZONE_PATH = PATH + "/zone_" + ZONE
-
 
 def fetch_value(value):
-    dir = ZONE_PATH + "/" + value
-    os.makedirs(dir, exist_ok=True)
+    dir = HDFS_PATH + "/" + value
+    hdfs.mkdirs(dir)
     cur = START
     today = datetime.date.today()
     url = BASE_URL + value + "/past-range"
@@ -51,9 +54,9 @@ def fetch_value(value):
         fname = dir + "/" + str(cur) + ".json"
 
         # Check if the file is already present
-        if os.path.isfile(fname):
+        if hdfs.exists(fname):
             try:
-                with open(fname) as file:
+                with hdfs.open(fname) as file:
                     data = json.load(file)
                 if len(data["data"]) == 288:
                     print(f"{value}@{cur} already present, skipping")
@@ -73,8 +76,7 @@ def fetch_value(value):
             if n != 288:
                 print(f"Expected 288 data points per day, got {n} at day {cur}. Continuing anyway.")
 
-            with open(fname, "w") as file:
-                file.write(r.text)
+            hdfs.create(fname, overwrite=True, data=r.text)
         else:
             print(f"Request failed with status {r.status_code}: {r.reason}")
             print(r.text)

@@ -6,6 +6,7 @@ import os
 import sys
 import time
 
+import pyhdfs
 import requests
 
 """
@@ -23,13 +24,16 @@ LONGITUDE = "21.0118"
 
 PARAMETERS = "temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,precipitation_probability,precipitation,rain,showers,snowfall,snow_depth,pressure_msl,surface_pressure,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,wind_speed_10m,wind_speed_180m,wind_speed_80m,wind_speed_120m,wind_direction_10m,wind_direction_80m,wind_direction_120m,wind_direction_180m,wind_gusts_10m,shortwave_radiation,direct_radiation,diffuse_radiation,direct_normal_irradiance,terrestrial_radiation,sunshine_duration"
 
-if len(sys.argv) > 1:
-    PATH = sys.argv[1]
-else:
-    PATH = "./historical-weather"
+NAMENODE_HOST = os.environ.get('NAMENODE_HOST', 'localhost')
+NAMENODE_PORT = os.environ.get('NAMENODE_PORT', '9870')
+HDFS_USER     = os.environ.get('HDFS_USER', 'hdfs')
+HDFS_PATH = f"/user/{HDFS_USER}/openmeteo/history/warsaw"
 
-dir = PATH + "/" + f"{LATITUDE},{LONGITUDE}"
-os.makedirs(dir, exist_ok=True)
+
+hdfs = pyhdfs.HdfsClient(f"{NAMENODE_HOST}:{NAMENODE_PORT}",
+                         user_name=HDFS_USER)
+
+hdfs.mkdirs(HDFS_PATH)
 params = {
     "latitude": LATITUDE,
     "longitude": LONGITUDE,
@@ -43,8 +47,8 @@ for year in range(START_YEAR, cur_year+1):
     max_month = cur_month if year == cur_year else 13
     for month in range(1, max_month):
         # Write data to PATH/LOCATION/DATE.json, for example
-        # ./historical-weather/52.2298,21.0118/2025-01.json
-        fname = dir + f"/{year}-{month:02}.json"
+        # /user/hdfs/openmeteo/warsaw/2025-01.json
+        fname = HDFS_PATH + f"/{year}-{month:02}.json"
 
         # Calculate end of month
         start_date = datetime.date(year=year, month=month, day=1)
@@ -56,9 +60,9 @@ for year in range(START_YEAR, cur_year+1):
         expected_values = (next_month - start_date).days * 24
 
         # Check if the file is already present
-        if os.path.isfile(fname):
+        if hdfs.exists(fname):
             try:
-                with open(fname) as file:
+                with hdfs.open(fname) as file:
                     data = json.load(file)
                 n = len(data["hourly"]["time"])
                 if n == expected_values:
@@ -79,8 +83,7 @@ for year in range(START_YEAR, cur_year+1):
             if n != expected_values:
                 print(f"Expected {expected_values} data points this month, got {n} at {year}-{month:02}. Continuing anyway.")
 
-            with open(fname, "w") as file:
-                file.write(r.text)
+            hdfs.create(fname, overwrite=True, data=r.text)
         else:
             print(f"Request failed with status {r.status_code}: {r.reason}")
             print(r.text)
