@@ -50,7 +50,8 @@ Dataflow engine that sends processed data to the ingester API.
 - Image: `apache/nifi:1.25.0`  
 - Port: `8080` (NiFi UI)  
 - Volumes: templates + NiFi state  
-- Depends on: hdfs-ingester  
+- Depends on: hdfs-ingester
+![Ingest data](nifi_flow.png)
 
 ### 5) tester
 Runs end-to-end tests validating the entire pipeline (NiFi → Ingester → HDFS).  
