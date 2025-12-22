@@ -17,6 +17,7 @@ services:
   datanode:  ### data warehouse - keeps data in HDFS 
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode
+    hostname: datanode
     platform: linux/amd64
     environment:
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
@@ -26,6 +27,9 @@ services:
       - hdfs_datanode:/hadoop/dfs/data
     depends_on:
       - namenode
+    ports:
+      - "9864:9864"
+      - "9866:9866"
 
   hdfs-init: 
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -73,6 +77,7 @@ services:
     volumes:
       - ./nifi:/opt/nifi/nifi-current/templates
       - nifi_state:/opt/nifi/nifi-current/flow
+      - nifi_conf:/opt/nifi/nifi-current/conf
     environment:
       - NIFI_WEB_HTTP_HOST=0.0.0.0
       - NIFI_WEB_HTTP_PORT=8080
@@ -115,3 +120,4 @@ volumes:
   hdfs_namenode:
   hdfs_datanode:
   nifi_state:
+  nifi_conf:
