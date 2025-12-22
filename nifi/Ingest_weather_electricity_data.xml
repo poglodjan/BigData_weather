@@ -1686,7 +1686,7 @@
                     </entry>
                     <entry>
                         <key>Remote URL</key>
-                        <value>https://api.electricitymaps.com/v3/electricity-mix/latest?zone=PL&amp;temporalGranularity=5_minutes</value>
+                        <value>https://api.electricitymaps.com/v3/electricity-mix/latest?zone=PL&amp;temporalGranularity=5_minutes&amp;flowTraced=false</value>
                     </entry>
                     <entry>
                         <key>disable-http2</key>
