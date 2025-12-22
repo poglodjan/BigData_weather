@@ -1,7 +1,5 @@
 # Big Data Pipeline — Docker Compose Overview
 
-Task shedulling - https://www.notion.so/9d41b0c0b076483b8eda32f2cb13bf0d?v=2b761f28fc798020a09b000ce390b754&source=copy_link
-
 This project runs a lightweight data pipeline using **HDFS**, **Apache NiFi**, a **Flask ingester**, and **end-to-end tests**.  
 It consists of **five containers** defined in `docker-compose.yml`.
 
@@ -11,6 +9,14 @@ It consists of **five containers** defined in `docker-compose.yml`.
 docker-compose up --build
 ```
 
+### If directiories are not created automatically:
+```bash
+docker exec -it namenode hdfs dfs -mkdir -p /user/hdfs/electricitymaps/zone_PL
+docker exec -it namenode hdfs dfs -mkdir -p /user/hdfs/openmeteo/warsaw
+docker exec -it namenode hdfs dfs -chmod -R 777 /user
+docker exec -it namenode hdfs dfs -ls -R /user
+```
+
 ### Clean 
 
 ```bash
@@ -18,8 +24,6 @@ docker-compose down
 ```
 
 ---
-## NIFI flow:
-![Flow](nifi_flow.png)
 
 ## Containers
 
