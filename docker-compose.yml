@@ -8,6 +8,7 @@ services:
       - CLUSTER_NAME=nm-cluster
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
       - HDFS_CONF_dfs_permissions_enabled=false 
+      - HDFS_CONF_dfs_replication=1
     volumes:
       - hdfs_namenode:/hadoop/dfs/name
     ports:
@@ -23,6 +24,7 @@ services:
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
       - HDFS_NAMENODE_URI=hdfs://namenode:9000
       - DFS_DATANODE_USE_DATANODE_HOSTNAME=true
+      - HDFS_CONF_dfs_replication=1
     volumes:
       - hdfs_datanode:/hadoop/dfs/data
     depends_on:
