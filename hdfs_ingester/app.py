@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import os, requests, json, traceback
+import os, requests, traceback
 from datetime import datetime
 from urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
@@ -31,69 +31,89 @@ def get_session():
     session.mount("https://", adapter)
     return session
 
-# --- utility function (saving to particular target dir) ---
-def save_to_hdfs(payload, target_dir):
-    try:
-        if not payload:
-            return jsonify({'error': 'Empty payload'}), 400
+def hdfs_exists(path):
+    session = get_session()
+    url = f"{WEBHDFS_BASE}{path}"
+    r = session.get(
+        url,
+        params={"op": "GETFILESTATUS"},
+        headers=WEBHDFS_HEADERS,
+        timeout=10,
+    )
+    return r.status_code == 200
 
-        ts   = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-        path = f'{target_dir}/{ts}.json'
+def hdfs_create_or_append(path, payload, method, params):
+    # set up retry session
+    session = get_session()
 
-        print(f"INFO: Saving to {path}")
+    # Step 1: Query to node (create)
+    create_url = f"{WEBHDFS_BASE}{path}"
 
-        # set up retry session
-        session = get_session()
+    r = session.request(
+        method,
+        create_url,
+        params=params,
+        allow_redirects=False,
+        headers=WEBHDFS_HEADERS,
+        timeout=60  # timeout 1 minute
+    )
 
-        # Step 1: Query to node (create)
-        create_url = f"{WEBHDFS_BASE}{path}"
-        params = {
-            'op': 'CREATE',
-            'user.name': HDFS_USER,
-            'overwrite': 'true',
-            'createparent': 'true'
+    final_response = None
+
+    # Step 2: Redirect option
+    if r.status_code == 307:
+        redirect_url = r.headers['Location']
+        u = urlparse(redirect_url)
+        new_netloc = f"{DATANODE_HOST}:{DATANODE_PORT}"
+        put_url = u._replace(netloc=new_netloc).geturl()
+
+        put_headers = {
+            **WEBHDFS_HEADERS,
+            'Content-Type': 'application/json'
         }
 
-        r = session.put(
-            create_url,
-            params=params,
-            allow_redirects=False,
-            headers=WEBHDFS_HEADERS,
-            timeout=60  # timeout 1 minute
+        final_response = session.request(
+            method,
+            put_url,
+            data=payload,
+            headers=put_headers,
+            timeout=60 
         )
+    elif r.status_code == 201:
+        final_response = r
+    else:
+        print(f"ERROR NameNode: {r.status_code} - {r.text}")
+        return jsonify({'error': 'NameNode failed', 'details': r.text}), 500
 
-        final_response = None
+    if final_response.status_code not in (200, 201):
+        print(f"ERROR DataNode: {final_response.status_code} - {final_response.text}")
+        return jsonify({'error': 'DataNode write failed', 'details': final_response.text}), 500
 
-        # Step 2: Redirect option
-        if r.status_code == 307:
-            redirect_url = r.headers['Location']
-            u = urlparse(redirect_url)
-            new_netloc = f"{DATANODE_HOST}:{DATANODE_PORT}"
-            put_url = u._replace(netloc=new_netloc).geturl()
+    return jsonify({'result': 'ok', 'path': path}), 201
 
-            put_headers = {
-                **WEBHDFS_HEADERS,
-                'Content-Type': 'application/json'
-            }
+def hdfs_create(path, payload):
+    params = {
+        'op': 'CREATE',
+        'user.name': HDFS_USER,
+        'overwrite': 'false',
+    }
+    print(f"INFO: Creating file {path}")
+    return hdfs_create_or_append(path, payload, 'PUT', params)
 
-            final_response = session.put(
-                put_url,
-                data=json.dumps(payload),
-                headers=put_headers,
-                timeout=60 
-            )
-        elif r.status_code == 201:
-            final_response = r
-        else:
-            print(f"ERROR NameNode: {r.status_code} - {r.text}")
-            return jsonify({'error': 'NameNode failed', 'details': r.text}), 500
+def hdfs_append(path, payload):
+    params = {
+        'op': 'APPEND',
+        'user.name': HDFS_USER,
+    }
+    print(f"INFO: Appending to file {path}")
+    return hdfs_create_or_append(path, payload, 'POST', params)
 
-        if final_response.status_code not in (200, 201):
-            print(f"ERROR DataNode: {final_response.status_code} - {final_response.text}")
-            return jsonify({'error': 'DataNode write failed', 'details': final_response.text}), 500
-
-        return jsonify({'result': 'ok', 'path': path}), 201
-
+def save_to_hdfs(path, payload):
+    try:
+        if not hdfs_exists(path):
+            return hdfs_create(path, payload)
+        # Append as next line if there is already a file for this day
+        return hdfs_append(path, payload)
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': 'Internal Error', 'message': str(e)}), 500
@@ -101,23 +121,37 @@ def save_to_hdfs(payload, target_dir):
 
 # --- ENDPOINTS /electricity and /weather ----
 
-@app.route('/ingest/electricity', methods=['POST', 'HEAD'])
-def ingest_electricity():
+@app.route('/ingest/electricity/<measurement>', methods=['POST', 'HEAD'])
+def ingest_electricity(measurement):
     if request.method == 'HEAD':
         return '', 200
         
-    target_dir = f'/user/{HDFS_USER}/electricitymaps/zone_PL'
     payload = request.get_json(force=True)
-    return save_to_hdfs(payload, target_dir)
+    if measurement == "electricity-mix":
+        dt_string = payload["data"][0]["datetime"]
+    else:
+        dt_string = payload["datetime"]
+    dt = datetime.fromisoformat(dt_string)
+    day = str(dt.date())
+    # File path for this day
+    path = f"/user/{HDFS_USER}/electricitymaps/zone_PL/{measurement}/{day}.json"
+    return save_to_hdfs(path, request.get_data() + b'\n')
 
-@app.route('/ingest/weather', methods=['POST', 'HEAD'])
-def ingest_weather():
+@app.route('/ingest/weather/<timespan>', methods=['POST', 'HEAD'])
+def ingest_weather(timespan):
     if request.method == 'HEAD':
         return '', 200
 
-    target_dir = f'/user/{HDFS_USER}/openmeteo/warsaw'
     payload = request.get_json(force=True)
-    return save_to_hdfs(payload, target_dir)
+    if timespan == "current":
+        dt_string = payload["current"]["time"]
+    else:
+        dt_string = payload[timespan]["time"][0]
+    dt = datetime.fromisoformat(dt_string)
+    day = str(dt.date())
+    # File path for this day
+    path = f"/user/{HDFS_USER}/openmeteo/warsaw/{timespan}/{day}.json"
+    return save_to_hdfs(path, request.get_data() + b'\n')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
