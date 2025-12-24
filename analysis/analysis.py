@@ -114,10 +114,12 @@ common = common.select(
 
 solar_reg = LinearRegression(labelCol="solar")
 solar_model = solar_reg.fit(train)
+solar_model.save("solar_model")
 solar_prediction = solar_model.transform(test)
 
 wind_reg = LinearRegression(labelCol="wind")
 wind_model = wind_reg.fit(train)
+wind_model.save("wind_model")
 wind_prediction = wind_model.transform(test)
 
 # Generating plots:
