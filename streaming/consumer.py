@@ -10,7 +10,7 @@ while consumer is None:
     try:
         print("Trying to connect to Kafka...")
         consumer = KafkaConsumer(
-            "weather-stream",
+            "openmeteo_current",
             bootstrap_servers="kafka:9092",
             group_id="weather-prediction",
             auto_offset_reset="latest",
