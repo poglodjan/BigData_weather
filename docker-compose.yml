@@ -161,10 +161,12 @@ services:
     image: grafana/grafana
     container_name: grafana
     restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: true
     ports:
       - "2000:3000"
     volumes:
-      - grafana-storage:/var/lig/grafana
+      - grafana-storage:/var/lib/grafana
 
 
 
