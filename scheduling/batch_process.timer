@@ -1,0 +1,9 @@
+[Unit]
+Description=Big Data recurring batch processing
+
+[Timer]
+Persistent=true
+OnCalendar=daily
+
+[Install]
+WantedBy=timers.target
