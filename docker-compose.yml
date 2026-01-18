@@ -139,13 +139,6 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
-  stream-consumer:
-    build: ./streaming
-    container_name: stream-consumer
-    depends_on:
-      - kafka
-    restart: unless-stopped
-
   spark:
     build: ./spark
     container_name: spark
@@ -154,8 +147,9 @@ services:
     working_dir: /app
     depends_on:
       - kafka
+    ports:
+      - "4040:4040"
     command: sleep infinity
-
 
   grafana:
     image: grafana/grafana
@@ -168,6 +162,16 @@ services:
     volumes:
       - grafana-storage:/var/lib/grafana
 
+  data-dam:
+    build: ./data-dam
+    container_name: data-dam
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - kafka
+    volumes:
+      - ./data-dam:/app
+      - data-dam-store:/data
 
 
 volumes:
@@ -176,3 +180,4 @@ volumes:
   nifi_state:
   nifi_conf:
   grafana-storage:
+  data-dam-store:
