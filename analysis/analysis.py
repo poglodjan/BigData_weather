@@ -6,6 +6,7 @@ import json
 import os
 
 from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.evaluation import RegressionEvaluator
 
 
 import pandas
@@ -189,6 +190,23 @@ print("Solar model saved")
 
 solar_prediction = solar_model.transform(test)
 
+solar_rmse = RegressionEvaluator(
+    labelCol="solar",
+    predictionCol="prediction",
+    metricName="rmse"
+).evaluate(solar_prediction)
+
+solar_r2 = RegressionEvaluator(
+    labelCol="solar",
+    predictionCol="prediction",
+    metricName="r2"
+).evaluate(solar_prediction)
+
+print("SOLAR RMSE:", solar_rmse)
+print("SOLAR R2:", solar_r2)
+
+
+
 wind_reg = LinearRegression(labelCol="wind")
 wind_model = wind_reg.fit(train)
 wind_model.write().overwrite().save(
@@ -199,6 +217,22 @@ wind_model.write().overwrite().save(
 
 wind_prediction = wind_model.transform(test)
 
+wind_rmse = RegressionEvaluator(
+    labelCol="wind",
+    predictionCol="prediction",
+    metricName="rmse"
+).evaluate(wind_prediction)
+
+wind_r2 = RegressionEvaluator(
+    labelCol="wind",
+    predictionCol="prediction",
+    metricName="r2"
+).evaluate(wind_prediction)
+
+print("WIND RMSE:", wind_rmse)
+print("WIND R2:", wind_r2)
+
+
 # Generating plots:
 #sample = solar_prediction.where(solar_prediction.datetime > datetime.datetime(2024, 3, 8)).sort("datetime")
 #sample.plot(x="datetime", y=["solar", "prediction"], labels={"value": "MW"},
@@ -207,3 +241,41 @@ wind_prediction = wind_model.transform(test)
 #sample = wind_prediction.where(wind_prediction.datetime > datetime.datetime(2024, 3, 8)).sort("datetime")
 #sample.plot(x="datetime", y=["wind", "prediction"], labels={"value": "MW"},
 #            title="Wind power test data prediction")
+
+
+#saving metrics
+
+metrics_df = spark.createDataFrame(
+    [
+        ("solar", solar_rmse, solar_r2),
+        ("wind", wind_rmse, wind_r2),
+    ],
+    ["model", "rmse", "r2"]
+)
+
+metrics_df.show()
+
+metrics_df.write.mode("overwrite").json(
+    "hdfs://namenode:9000/user/hdfs/model_metrics/offline"
+)
+
+# saving data for plots
+solar_plot_df = solar_prediction.select(
+    "datetime",
+    sf.col("solar").alias("actual"),
+    sf.col("prediction").alias("predicted")
+)
+
+wind_plot_df = wind_prediction.select(
+    "datetime",
+    sf.col("wind").alias("actual"),
+    sf.col("prediction").alias("predicted")
+)
+
+solar_plot_df.write.mode("overwrite").parquet(
+    "hdfs://namenode:9000/user/hdfs/model_eval/solar"
+)
+
+wind_plot_df.write.mode("overwrite").parquet(
+    "hdfs://namenode:9000/user/hdfs/model_eval/wind"
+)
