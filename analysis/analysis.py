@@ -12,7 +12,7 @@ from pyspark.ml.evaluation import RegressionEvaluator
 import pandas
 import pyspark
 import pyspark.sql.functions as sf
-from pyspark.ml.regression import LinearRegression
+from pyspark.ml.regression import GBTRegressor
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -42,42 +42,6 @@ def electricity_data():
 
     return df
 
-
-
-# def electricity_data():
-#     schema = StructType(
-#         [
-#             StructField("datetime", StringType(), False),
-#             StructField("updatedAt", StringType()),
-#             StructField("mix", MapType(StringType(), LongType())),
-#             # StructField("isEstimated", BooleanType()),
-#         ]
-#     )
-#     dir = "historical-electricity/zone_PL/"
-#     measurement = "electricity-mix"
-
-#     full_df = None
-#     files = os.listdir(dir + "/" + measurement)
-#     files.sort()
-
-#     for file in files[:100]:
-#         with open(dir + "/" + measurement + "/" + file) as fp:
-#             contents = json.load(fp)
-#         df = spark.createDataFrame(contents["data"], schema)
-#         transformed = df.select(
-#             df.datetime.cast(TimestampType()),
-#             df.updatedAt.cast(TimestampType()),
-#             df.mix["solar"].name("solar"),
-#             df.mix["wind"].name("wind"),
-#             df.mix,
-#         )
-#         if full_df is not None:
-#             full_df = full_df.union(transformed)
-#         else:
-#             full_df = transformed
-#     return full_df
-
-
 def weather_data():
     path = "hdfs://namenode:9000/user/hdfs/openmeteo/warsaw/hourly/*"
 
@@ -97,38 +61,8 @@ def weather_data():
     return df
 
 
-# def weather_data():
-#     dir = "historical-weather/52.2298,21.0118/"
-
-#     full_df = None
-#     files = os.listdir(dir)
-#     files.sort()
-#     for file in iter(e for e in os.listdir(dir) if int(e[:4]) >= 2024):
-#         with open(dir + "/" + file) as fp:
-#             contents = json.load(fp)
-
-#         # Use pandas for data structuring first because it can handle this
-#         # structure better than spark
-#         pandas_df = pandas.DataFrame(contents["hourly"])
-#         pandas_df.time = pandas.to_datetime(pandas_df.time)
-
-#         # Remove columns with only null values
-#         to_drop = []
-#         for col in pandas_df.columns:
-#             if pandas_df[col].isna().all():
-#                 to_drop.append(col)
-#         pandas_df.drop(columns=to_drop, inplace=True)
-
-#         df = spark.createDataFrame(pandas_df).withColumnRenamed("time", "datetime")
-#         if full_df is not None:
-#             full_df = full_df.union(df)
-#         else:
-#             full_df = df
-
-#     return full_df
-
-
-spark = pyspark.sql.SparkSession.builder.getOrCreate()
+spark = pyspark.sql.SparkSession.builder.appName("weatherBatch").getOrCreate()
+spark.sparkContext.setLogLevel("ERROR")
 
 ed = electricity_data()
 wd = weather_data()
@@ -168,7 +102,7 @@ assembler = VectorAssembler(
     outputCol="features"
 )
 
-common = assembler.transform(common_raw)
+common = assembler.transform(common_raw).persist()
 
 MODEL_BASE = "hdfs://namenode:9000/user/hdfs/models"
 
@@ -176,9 +110,10 @@ assembler.write().overwrite().save(
     f"{MODEL_BASE}/weather_assembler"
 )
 
-(train, test) = common.randomSplit([0.5, 0.5])
+(train, test) = common.randomSplit([0.8, 0.2])
+train = common # Final model: train with full dataset
 
-solar_reg = LinearRegression(labelCol="solar")
+solar_reg = GBTRegressor(labelCol="solar")
 solar_model = solar_reg.fit(train)
 print("Saving solar model...")
 MODEL_BASE = "hdfs://namenode:9000/user/hdfs/models"
@@ -188,7 +123,8 @@ solar_model.write().overwrite().save(
 )
 print("Solar model saved")
 
-solar_prediction = solar_model.transform(test)
+solar_prediction = solar_model.transform(test)\
+    .withColumn("prediction", sf.greatest(sf.col("prediction"), sf.lit(0)))
 
 solar_rmse = RegressionEvaluator(
     labelCol="solar",
@@ -207,7 +143,7 @@ print("SOLAR R2:", solar_r2)
 
 
 
-wind_reg = LinearRegression(labelCol="wind")
+wind_reg = GBTRegressor(labelCol="wind")
 wind_model = wind_reg.fit(train)
 wind_model.write().overwrite().save(
     f"{MODEL_BASE}/wind_model"
@@ -215,7 +151,8 @@ wind_model.write().overwrite().save(
 
 
 
-wind_prediction = wind_model.transform(test)
+wind_prediction = wind_model.transform(test)\
+    .withColumn("prediction", sf.greatest(sf.col("prediction"), sf.lit(0)))
 
 wind_rmse = RegressionEvaluator(
     labelCol="wind",
@@ -251,31 +188,55 @@ metrics_df = spark.createDataFrame(
         ("wind", wind_rmse, wind_r2),
     ],
     ["model", "rmse", "r2"]
-)
+).withColumn("datetime", sf.current_timestamp())
 
 metrics_df.show()
 
-metrics_df.write.mode("overwrite").json(
-    "hdfs://namenode:9000/user/hdfs/model_metrics/offline"
+(
+    metrics_df
+    .write
+    .format("org.apache.spark.sql.cassandra")
+    .option("keyspace", "weather")
+    .option("table", "ml_metrics")
+    .mode("append")
+    .save()
 )
 
 # saving data for plots
 solar_plot_df = solar_prediction.select(
+    sf.lit("0").name("id"), # For Grafana plot
     "datetime",
     sf.col("solar").alias("actual"),
     sf.col("prediction").alias("predicted")
 )
 
 wind_plot_df = wind_prediction.select(
+    sf.lit("0").name("id"),
     "datetime",
     sf.col("wind").alias("actual"),
     sf.col("prediction").alias("predicted")
 )
 
-solar_plot_df.write.mode("overwrite").parquet(
-    "hdfs://namenode:9000/user/hdfs/model_eval/solar"
+(
+    solar_plot_df
+    .write
+    .format("org.apache.spark.sql.cassandra")
+    .option("keyspace", "weather")
+    .option("table", "solar_training")
+    .option("confirm.truncate", "true")
+    .mode("overwrite")
+    .save()
 )
+print("Saved solar_plot_df to Cassandra")
 
-wind_plot_df.write.mode("overwrite").parquet(
-    "hdfs://namenode:9000/user/hdfs/model_eval/wind"
+(
+    wind_plot_df
+    .write
+    .format("org.apache.spark.sql.cassandra")
+    .option("keyspace", "weather")
+    .option("table", "wind_training")
+    .option("confirm.truncate", "true")
+    .mode("overwrite")
+    .save()
 )
+print("Saved wind_plot_df to Cassandra")

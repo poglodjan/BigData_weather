@@ -173,6 +173,19 @@ services:
       - ./data-dam:/app
       - data-dam-store:/data
 
+  cassandra:
+    image: cassandra:4.1
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: weather-cluster
+      CASSANDRA_DC: dc1
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    networks:
+      - default
+
 
 volumes:
   hdfs_namenode:
@@ -181,3 +194,4 @@ volumes:
   nifi_conf:
   grafana-storage:
   data-dam-store:
+  cassandra_data:
