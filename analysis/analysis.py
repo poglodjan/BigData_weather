@@ -82,7 +82,7 @@ weather_vars = [
     "temperature_2m",
     "relative_humidity_2m",
     "wind_speed_10m",
-    "cloud_cover",
+    "precipitation",
     "shortwave_radiation",
 ]
 

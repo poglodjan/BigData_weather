@@ -2,6 +2,7 @@
 
 import datetime
 import os
+import sys
 import time
 
 from kafka import KafkaProducer
@@ -19,6 +20,10 @@ topics = [
     "electricity_renewable",
     "electricity_load",
 ]
+
+start_dt = None
+if len(sys.argv) >= 2:
+    start_dt = datetime.datetime.fromisoformat(sys.argv[1])
 
 producer = None
 while producer is None:
@@ -41,8 +46,9 @@ def list_available():
                     dt = datetime.datetime.fromisoformat(fname)
                 except ValueError:
                     continue
-                path = dirname + "/" + fname
-                messages.append((dt, topic, path))
+                if start_dt is None or dt >= start_dt:
+                    path = dirname + "/" + fname
+                    messages.append((dt, topic, path))
     messages.sort()
     return messages
 
