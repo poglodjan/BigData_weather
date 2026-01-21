@@ -74,9 +74,11 @@ Runs end-to-end tests validating the entire pipeline (NiFi → Ingester → HDFS
 
 | Service      | URL                      |
 |-------------|--------------------------|
+| Grafana     | http://localhost:2000    |
 | NameNode UI | http://localhost:9870    |
-| NiFi UI     | http://localhost:8080    |
+| NiFi UI     | http://localhost:8080/nifi   |
 | Ingester API| http://localhost:5050/ingest |
+| Spark       | http://localhost:4040    |
 
 ---
 
