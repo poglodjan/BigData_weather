@@ -8,8 +8,6 @@ import time
 from kafka import KafkaProducer
 
 STORE = "/data"
-# Replay messages this many times faster
-SPEEDUP = 30
 
 topics = [
     "openmeteo_current",
@@ -21,9 +19,13 @@ topics = [
     "electricity_load",
 ]
 
+# Replay messages this many times faster
+SPEEDUP = 30
 start_dt = None
 if len(sys.argv) >= 2:
     start_dt = datetime.datetime.fromisoformat(sys.argv[1])
+if len(sys.argv) >= 3:
+    SPEEDUP = int(sys.argv[2])
 
 producer = None
 while producer is None:
@@ -70,3 +72,5 @@ for (dt, topic, path) in messages:
         producer.send(new_topic, file.read())
     print(dt, new_topic)
     cur_time = dt
+
+producer.close(timeout=5)

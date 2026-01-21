@@ -17,4 +17,6 @@ docker exec --workdir="/app" spark \
 	--conf spark.driver.extraJavaOptions="-Divy.cache.dir=/tmp -Divy.home=/tmp" \
 	--packages "com.datastax.spark:spark-cassandra-connector_2.13:3.5.1" \
 	"./analysis/analysis.py"
-exit $?
+
+# Restart streaming job
+docker restart spark

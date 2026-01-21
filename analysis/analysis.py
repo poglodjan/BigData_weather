@@ -25,6 +25,9 @@ from pyspark.sql.types import (
 )
 
 
+# Only use last 28 days of data
+THRESHOLD = datetime.datetime.now() - datetime.timedelta(days=28)
+
 def electricity_data():
     path = "hdfs://namenode:9000/user/hdfs/electricitymaps/zone_PL/electricity-mix/*"
 
@@ -39,6 +42,7 @@ def electricity_data():
         sf.col("row.mix")["solar"].cast(DoubleType()).alias("solar"),
         sf.col("row.mix")["wind"].cast(DoubleType()).alias("wind"),
     )
+    df = df.filter(df.datetime >= THRESHOLD)
 
     return df
 
@@ -57,6 +61,9 @@ def weather_data():
     # Rename and cast time
     df = df.withColumnRenamed("time", "datetime") \
            .withColumn("datetime", sf.to_timestamp("datetime"))
+
+    # Cutoff data range
+    df = df.filter(df.datetime >= THRESHOLD)
 
     return df
 
@@ -85,8 +92,6 @@ weather_vars = [
     "precipitation",
     "shortwave_radiation",
 ]
-
-
 
 common_raw = ed.join(wd, "datetime").select(
     "datetime",

@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   namenode: ### main part of HDFS - keeps files matadata
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
@@ -112,7 +111,6 @@ services:
     build: ./tests
     container_name: tester
     environment:
-      - ELECTRICITYMAPS_TOKEN=${ELECTRICITYMAPS_TOKEN}
       - NAMENODE_HOST=namenode
       - NAMENODE_PORT=9870
     depends_on:
@@ -149,7 +147,7 @@ services:
       - kafka
     ports:
       - "4040:4040"
-    command: sleep infinity
+    command: /app/analysis/submit_speed.sh
 
   grafana:
     image: grafana/grafana
