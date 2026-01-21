@@ -3,6 +3,6 @@ Description=Big Data recurring batch processing
 
 [Service]
 Type=exec
-ExecStart=/home/nifive/BigData_weather/scheduling/run_batch_processing.sh
+ExecStart=/home/nifive/BigData_weather/setup/run_batch_processing.sh
 RestartSec=60
 Restart=on-failure
